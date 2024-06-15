@@ -3,12 +3,15 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	"github.com/labstack/echo/v4"
 )
 
 type City struct {
@@ -19,12 +22,11 @@ type City struct {
 	Population  int    `json:"population,omitempty" db:"Population"`
 }
 
-func main() {
-	argCity := "Tokyo"
-	if len(os.Args) >= 2 {
-		argCity = os.Args[1]
-	}
+var (
+	db *sqlx.DB
+)
 
+func main() {
 	jst, err := time.LoadLocation("Asia/Tokyo")
 	if err != nil {
 		log.Fatal(err)
@@ -39,19 +41,28 @@ func main() {
 		Collation: "utf8mb4_unicode_ci",
 		Loc:       jst,
 	}
-	db, err := sqlx.Open("mysql", conf.FormatDSN())
+	_db, err := sqlx.Open("mysql", conf.FormatDSN())
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("connected")
+	db = _db
+	e := echo.New()
+	e.GET("/cities/:cityName", getCityInfoHandler)
+	e.Start(":8080")
+}
+
+func getCityInfoHandler(c echo.Context) error {
+	cityName := c.Param("cityName")
+	log.Println(cityName)
 	var city City
-	err = db.Get(&city, "SELECT * FROM city WHERE Name = ?", argCity)
+	err := db.Get(&city, "SELECT * FROM city WHERE Name=?", cityName)
 	if errors.Is(err, sql.ErrNoRows) {
-		log.Printf("no such city Name = '%s'\n", argCity)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("No such city Name = %s", cityName))
 	}
 	if err != nil {
-		log.Fatalf("DB Error: %s\n", err)
+		log.Printf("DB Error: %s", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
 	}
-	log.Printf("%sの人口は%d人です\n", argCity, city.Population)
+	return c.JSON(http.StatusOK, city)
 }
